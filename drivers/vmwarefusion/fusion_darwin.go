@@ -230,12 +230,14 @@ func (d *Driver) PreCreateCheck() error {
 }
 
 func (d *Driver) Create() error {
+	log.Infof("Begin...")
 	b2dutils := mcnutils.NewB2dUtils(d.StorePath)
 	if err := b2dutils.CopyIsoToMachineDir(d.Boot2DockerURL, d.MachineName); err != nil {
 		return err
 	}
 
 	// download cloud-init config drive
+	log.Infof("Download cloud-init...")
 	if d.ConfigDriveURL != "" {
 		if err := b2dutils.DownloadISO(d.ResolveStorePath("."), isoConfigDrive, d.ConfigDriveURL); err != nil {
 			return err
@@ -257,6 +259,7 @@ func (d *Driver) Create() error {
 	}
 
 	// Generate vmx config file from template
+	log.Infof("Creating VMX...")
 	vmxt := template.Must(template.New("vmx").Parse(vmx))
 	vmxfile, err := os.Create(d.vmxPath())
 	if err != nil {
@@ -265,6 +268,7 @@ func (d *Driver) Create() error {
 	vmxt.Execute(vmxfile, d)
 
 	// Generate vmdk file
+	log.Infof("Creating vmdk...")
 	diskImg := d.ResolveStorePath(fmt.Sprintf("%s.vmdk", d.MachineName))
 	if _, err := os.Stat(diskImg); err != nil {
 		if !os.IsNotExist(err) {
@@ -285,10 +289,10 @@ func (d *Driver) Create() error {
 	var ip string
 
 	log.Infof("Waiting for VM to come online...")
-	for i := 1; i <= 60; i++ {
+	for i := 1; i <= 120; i++ {
 		ip, err = d.GetIP()
 		if err != nil {
-			log.Debugf("Not there yet %d/%d, error: %s", i, 60, err)
+			log.Debugf("Not there yet %d/%d, error: %s", i, 120, err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
@@ -357,7 +361,14 @@ func (d *Driver) Create() error {
 	}
 
 	// Test if /var/lib/boot2docker exists
-	_, _, err = vmrun("-gu", B2DUser, "-gp", B2DPass, "directoryExistsInGuest", d.vmxPath(), "/var/lib/boot2docker")
+	//_, _, err = vmrun("-gu", B2DUser, "-gp", B2DPass, "directoryExistsInGuest", d.vmxPath(), "/var/lib/boot2docker")
+	//if err != nil {
+	//	return err
+	//}
+
+	// mkdir /var/lib/boot2docker
+	log.Debugf("mkdir /var/lib/boot2docker...")
+	_, _, err = vmrun("-gu", B2DUser, "-gp", B2DPass, "runScriptInGuest", d.vmxPath(), "/bin/sh", "sudo sh -c \"mkdir -p /var/lib/boot2docker > /var/log/userdata.log 2>&1 \"")
 	if err != nil {
 		return err
 	}
@@ -368,8 +379,8 @@ func (d *Driver) Create() error {
 		return err
 	}
 
-	// Expand tar file.
-	_, _, err = vmrun("-gu", B2DUser, "-gp", B2DPass, "runScriptInGuest", d.vmxPath(), "/bin/sh", "sudo sh -c \"tar xvf /home/docker/userdata.tar -C /home/docker > /var/log/userdata.log 2>&1 && chown -R docker:staff /home/docker\"")
+	// Expand tar file.tar --warning=no-timestamp
+	_, _, err = vmrun("-gu", B2DUser, "-gp", B2DPass, "runScriptInGuest", d.vmxPath(), "/bin/sh", "sudo sh -c \"tar xvf /home/docker/userdata.tar -C /home/docker --warning=no-timestamp > /var/log/userdata.log 2>&1 && chown -R docker:staff /home/docker\"")
 	if err != nil {
 		return err
 	}
